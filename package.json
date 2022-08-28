@@ -1,0 +1,28 @@
+{
+  "name": "popdown",
+  "version": "1.0.0",
+  "description": "Isolate and remove marketing and GDPR popups from websites",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "crawl": "node src/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/piercefreeman/popdown.git"
+  },
+  "type": "module",
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/piercefreeman/popdown/issues"
+  },
+  "homepage": "https://github.com/piercefreeman/popdown#readme",
+  "dependencies": {
+    "playwright": "^1.25.1"
+  },
+  "devDependencies": {
+    "typescript": "^4.8.2"
+  }
+}
