@@ -106,7 +106,6 @@ export default class ReplayManager {
     config: NodeFetchOptions,
     fetchFn: any
   ): Promise<Response> {
-    console.log("New request", url);
     const startedAt = Date.now();
 
     const response = await fetchFn(url, config);
