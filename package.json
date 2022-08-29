@@ -19,6 +19,7 @@
   },
   "homepage": "https://github.com/piercefreeman/popdown#readme",
   "dependencies": {
+    "chalk": "^4.1.2",
     "make-fetch-happen": "^10.2.1",
     "node-fetch": "^2.6.6",
     "playwright": "^1.25.1",

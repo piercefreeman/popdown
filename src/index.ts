@@ -6,6 +6,8 @@ import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import fetch from 'make-fetch-happen';
 import { writeFile } from 'fs/promises';
+import chalk from 'chalk';
+import { exit } from 'process';
 
 const TAPE_DIRECTORY = "./tape-directory";
 const IDENTIFIER_KEY = "pd-identifier"
@@ -90,28 +92,34 @@ const run = async (url: string) => {
 
     await page.goto(url);
 
-    const ans = await promptUser("Do you see the popup? (y)\n > ");
-    if (ans.charAt(0) != "y") throw new Error("User confirmation failed.");
+    const ans = await promptUser(chalk.blue("Do you see the popup? (y)\n > "));
+    if (ans.charAt(0) != "y") {
+        console.log(chalk.red("User confirmation failed."));
+        exit();
+    }
 
     await injectElementIdentifiers(page);
     const identifiers = await getIdentifiers(page);
-    console.log("Element identifiers injected.");
+    console.log("\nElement identifiers injected. Check in devtools for the identifiers that match the main popup dom.\n");
 
     const allPopupIdentifiers = [];
     while (true) {
-        const ans = await promptUser("What are the popup identifiers? (newline to finish)\n > ");
+        const ans = await promptUser(chalk.blue("What are the popup identifiers? (newline to finish)\n > "));
         if (!ans) break;
         // Validate that this is a valid identifier
         if (identifiers.indexOf(ans) == -1) {
-            console.log("Invalid identifier. Try again...");
+            console.log(chalk.red("Invalid identifier. Try again..."));
             continue;
         } else {
-            console.log("Valid identifier, adding to groundtruth");
+            console.log(chalk.green("Valid identifier, adding to groundtruth..."));
         }
         allPopupIdentifiers.push(ans);
     }
 
-    if (allPopupIdentifiers.length == 0) throw new Error("No popup identifiers supplied.");
+    if (allPopupIdentifiers.length == 0) {
+        console.log(chalk.red("No popup identifiers supplied."));
+        exit();
+    }
 
     // Save the page content
     const content = await page.content();
