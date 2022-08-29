@@ -1,18 +1,13 @@
-import { Route, Request, Page, chromium } from 'playwright';
-import { recordToDict, promptUser } from './io';
+import { Page, chromium } from 'playwright';
+import { promptUser } from './io';
 import ReplayManager from './replay';
 import { v4 as uuidv4 } from 'uuid';
 import { join } from 'path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import fetch from 'make-fetch-happen';
+import { existsSync, mkdirSync } from 'fs';
 import { writeFile } from 'fs/promises';
 import chalk from 'chalk';
 import { exit } from 'process';
-//const https = require('https');
-//httpProxy = require('http-proxy');
-import httpProxy from 'http-proxy';
-var http = require('http');
-var Proxy = require('http-mitm-proxy');
+import Proxy from 'http-mitm-proxy';
 
 const TAPE_DIRECTORY = "./tape-directory";
 const IDENTIFIER_KEY = "pd-identifier"
@@ -58,147 +53,7 @@ const getIdentifiers = async (page: Page): Promise<Array<string>> => {
 }
 
 const run = async () => {
-
-
-    /*const proxy = httpProxy.createProxyServer({}); // See (†)
-    proxy.on('proxyReq', function(proxyReq: any, req: any, res: any, options: any) {
-        proxyReq.setHeader('X-Special-Proxy-Header', 'foobar');
-      });
-    //proxy.listen(5060)
-    http.createServer(function (req: any, res: any) {
-        // This simulates an operation that takes 500ms to execute
-        setTimeout(function () {
-          proxy.web(req, res);
-        }, 500);
-      }).listen(5060);*/
-      var http = require('http');
-
-/*http.createServer(function(request: any, response: any) {
-    console.log(request.method, request.url)
-
-    console.log("got a request", request)
-    var request_options = {
-        host: request.headers['host'],
-        port: 80,
-        path: request.url,
-        method: request.method,
-        headers: request.headers,
-    }
-    console.log("options", request_options)
-
-  //var proxy = http.request(80, request.headers['host'])
-  var proxy_request = http.request(request_options, function(proxy_response: any){
-    response.writeHead(proxy_response.statusCode, proxy_response.headers)
-
-    proxy_response.pipe(response)
-    console.log("RESPONSE", response)
-});
-request.pipe(proxy_request)*/
-// Import of net module
-/*const net = require("net");
-const server = net.createServer();
-
-NODE_EXTRA_CA_CERTS=./ssl/mitn.pem
-server.on("connection", (clientToProxySocket: any) => {
-    console.log("Client connected to proxy");
-    clientToProxySocket.once("data", (data: any) => {
-        let isTLSConnection = data.toString().indexOf("CONNECT") !== -1;
-
-        let serverPort = 80;
-        let serverAddress: any;
-        console.log(data.toString());
-        if (isTLSConnection) {
-            serverPort = 443;
-            serverAddress = data
-                .toString()
-                .split("CONNECT")[1]
-                .split(" ")[1]
-                .split(":")[0];
-        } else {
-            serverAddress = data.toString().split("Host: ")[1].split("\r\n")[0];
-        }
-        console.log(serverAddress);
-
-        // Creating a connection from proxy to destination server
-        let proxyToServerSocket = net.createConnection(
-            {
-                host: serverAddress,
-                port: serverPort,
-            },
-            () => {
-                console.log("Proxy to server set up");
-            }
-        );
-
-        console.log("Data", data)
-        if (isTLSConnection) {
-            clientToProxySocket.write("HTTP/1.1 200 OK\r\n\r\n");
-        } else {
-            proxyToServerSocket.write(data);
-        }
-
-        clientToProxySocket.pipe(proxyToServerSocket);
-        proxyToServerSocket.pipe(clientToProxySocket);
-
-        proxyToServerSocket.on("error", (err: any) => {
-            console.log("Proxy to server error");
-            console.log(err);
-        });
-
-        clientToProxySocket.on("error", (err: any) => {
-            console.log("Client to proxy error");
-            console.log(err)
-        });
-    });
-});
-
-server.on("error", (err: any) => {
-    console.log("Some internal server error occurred");
-    console.log(err);
-});
-
-server.on("close", () => {
-    console.log("Client disconnected");
-});
-
-server.listen(
-    {
-        host: "127.0.0.1",
-        port: 5010,
-    },
-    () => {
-        console.log("Server listening on 0.0.0.0:8080");
-    }
-);*/
-
-
-
-
-  /*proxy_request.addListener('response', function (proxy_response: any) {
-    console.log("Got resposne");
-    proxy_response.addListener('data', function(chunk: any) {
-      response.write(chunk, 'binary');
-    });
-    proxy_response.addListener('end', function() {
-      response.end();
-    });
-    response.writeHead(proxy_response.statusCode, proxy_response.headers);
-  });
-  request.addListener('data', function(chunk: any) {
-    proxy_request.write(chunk, 'binary');
-  });
-  request.addListener('end', function() {
-    proxy_request.end();
-  });
-}).listen(5010);*/
-// clients should connect to 5010; 4000 is internal
-
-var Proxy = require('http-mitm-proxy');
-var proxy = Proxy(
-    {
-        //sslCaDir: "ssl-proxies",
-    }
-);
+    var proxy = Proxy();
 
 proxy.onError(function(ctx: any, err: any) {
     console.error('proxy error:', err);
@@ -210,23 +65,58 @@ proxy.onError(function(ctx: any, err: any) {
     }
   });
   
+  // Indicates that a request has started
   proxy.onRequest(function(ctx: any, callback: any) {
-    console.log("ON REQUEST", ctx.clientToProxyRequest.url)
-    if (ctx.clientToProxyRequest.headers.host == 'www.google.com'
-      && ctx.clientToProxyRequest.url.indexOf('/search') == 0) {
+    const request = ctx.clientToProxyRequest;
+
+    console.log("ON REQUEST", request.url)
+
+    if (request.url.indexOf("produce_batch") > -1) {
+        ctx.proxyToClientResponse.write("Hacked, you cannot proceed to the website");
+        ctx.proxyToClientResponse.end();
+        // no callback() so proxy request is not sent to the server
+        return;
+    }
+
+    if (request.url.indexOf("analytics.js") > -1) {
       ctx.use(Proxy.gunzip);
   
+      /*
+      proxy.onRequestData(function(ctx, chunk, callback) {
+        console.log('REQUEST DATA:', chunk.toString());
+        return callback(null, chunk);
+      });*/
+    
+      ctx.onResponse(function(ctx: any, callback: any) {
+        const response = ctx.proxyToServerRequest.res;
+        console.log("ON RESPONSE", response.headers)
+        return callback()
+      });
+    
       ctx.onResponseData(function(ctx: any, chunk: any, callback: any) {
-        chunk = new Buffer(chunk.toString().replace(/<h3.*?<\/h3>/g, '<h3>Pwned!</h3>'));
+        //chunk = new Buffer(chunk.toString().replace(/<h3.*?<\/h3>/g, '<h3>Pwned!</h3>'));
+        chunk = Buffer.from("we are sparticus")
         return callback(null, chunk);
       });
+    
+
+      ctx.onResponseEnd(function(ctx: any, callback: any) {
+        //chunk = new Buffer(chunk.toString().replace(/<h3.*?<\/h3>/g, '<h3>Pwned!</h3>'));
+        return callback();
+      });
+
+      /*ctx.onResponseData(function(ctx: any, chunk: any, callback: any) {
+        //chunk = new Buffer(chunk.toString().replace(/<h3.*?<\/h3>/g, '<h3>Pwned!</h3>'));
+        chunk = new Buffer("we are sparticus")
+        return callback(null, chunk);
+      });*/
     }
     return callback();
   });
   
   proxy.listen({port: 5010});
 
-    let url = await promptUser(chalk.blue("What's the url to add to the datapoint? (y)\n > "));
+    let url = await promptUser(chalk.blue("What's the url to add to the datapoint?\n > "));
     if (!url) {
         console.log(chalk.red("No website provided."));
         exit();
