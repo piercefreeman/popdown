@@ -18,39 +18,48 @@ if (!existsSync(TAPE_DIRECTORY)) {
 
 const injectElementIdentifiers = async (page: Page) => {
     await page.evaluate((identifierKey) => {
-      // Re-implement uuid4 function so it can be injected into the page
-      function uuidv4() {
+        // Re-implement uuid4 function so it can be injected into the page
+        function uuidv4() {
         // @ts-ignore
         return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (c) =>
-          (
+            (
             c ^
             (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))
-          ).toString(16)
+            ).toString(16)
         );
-      }
+        }
 
-      var all = document.getElementsByTagName("*");
-      Array.from(all).forEach((element) => {
+        var all = document.getElementsByTagName("*");
+        Array.from(all).forEach((element) => {
         element.setAttribute(identifierKey, uuidv4().toString());
-      });
+        });
     }, IDENTIFIER_KEY);
-  }
+}
 
-  const getIdentifiers = async (page: Page): Promise<Array<string>> => {
+const getIdentifiers = async (page: Page): Promise<Array<string>> => {
     return await page.evaluate((identifierKey) => {
-      const allElements = Array.from(
+        const allElements = Array.from(
         document.querySelectorAll("*")
-      ) as Array<HTMLElement>;
+        ) as Array<HTMLElement>;
 
-      return allElements
+        return allElements
         .filter((element) => element.hasAttribute(identifierKey))
         .map((element) =>
-          element.getAttribute(identifierKey)
+            element.getAttribute(identifierKey)
         ) as Array<string>;
     }, IDENTIFIER_KEY);
-  }
+}
 
-const run = async (url: string) => {
+const run = async () => {
+    let url = await promptUser(chalk.blue("What's the url to add to the dataset? (y)\n > "));
+    if (!url) {
+        console.log(chalk.red("No website provided."));
+        exit();
+    }
+
+    // Fix some of the common issues with the url
+    if (url.indexOf("http") != 0) url = `http://${url}`;
+
     const tapeId = uuidv4();
     const replayManager = new ReplayManager(join(TAPE_DIRECTORY, `${tapeId}.json.gz`), "write");
     
@@ -142,5 +151,4 @@ const run = async (url: string) => {
     await browser.close();
 }
 
-const url = "https://freeman.vc";
-run(url);
+run();
