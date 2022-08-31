@@ -1,16 +1,13 @@
-import { Route, Request, Page, chromium } from 'playwright';
-import { recordToDict, promptUser } from './io';
+import { Page, chromium } from 'playwright';
+import { promptUser } from './io';
 import ReplayManager from './replay';
 import { v4 as uuidv4 } from 'uuid';
 import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
-import fetch from 'make-fetch-happen';
 import { writeFile } from 'fs/promises';
 import chalk from 'chalk';
 import { exit } from 'process';
-
-const TAPE_DIRECTORY = "./tape-directory";
-const IDENTIFIER_KEY = "pd-identifier"
+import { TAPE_DIRECTORY, IDENTIFIER_KEY } from './constants';
 
 if (!existsSync(TAPE_DIRECTORY)) {
     mkdirSync(TAPE_DIRECTORY);
@@ -51,7 +48,7 @@ const getIdentifiers = async (page: Page): Promise<Array<string>> => {
 }
 
 const run = async () => {
-    let url = await promptUser(chalk.blue("What's the url to add to the dataset? (y)\n > "));
+    let url = await promptUser(chalk.blue("What's the url to add to the datapoint?\n > "));
     if (!url) {
         console.log(chalk.red("No website provided."));
         exit();
@@ -62,44 +59,29 @@ const run = async () => {
 
     const tapeId = uuidv4();
     const replayManager = new ReplayManager(join(TAPE_DIRECTORY, `${tapeId}.json.gz`), "write");
-    
+    replayManager.listen();
+
     const browser = await chromium.launch({
         headless: false,
         args: [
             '--auto-open-devtools-for-tabs'
-        ]
+        ],
+        proxy: {
+            server: `http://127.0.0.1:${replayManager.port}`,
+        }
     });
-    
-    const page = await browser.newPage();
-
-    await page.route("**/*", async (route: Route, request: Request) => {
-        const headers = recordToDict(
-            await request.allHeaders()
-        );
-    
-        const fetchPayload = {
-            method: request.method(),
-            body: request.postData(),
-            headers,
-            timeout: 15*1000,
-        } as any;
-      
-        const response = await replayManager.handleFetch(
-            request.url(),
-            fetchPayload,
-            fetch
-        );
-    
-        const body = await response.buffer();
-
-        return await route.fulfill({
-            status: response.status,
-            body: body,
-            headers: recordToDict(response.headers.raw()),
-        });
+    // Sometimes popups will only show the first time a page is loaded; we create a new
+    // incognito browser to avoid this issue.
+    const context = await browser.newContext({
+        //ignoreHTTPSErrors: true,
     });
+    const page = await context.newPage();
 
-    await page.goto(url);
+    try {
+        await page.goto(url);
+    } catch (e) {
+        console.log(chalk.red(`Load error ${url}`));
+    }
 
     const ans = await promptUser(chalk.blue("Do you see the popup? (y)\n > "));
     if (ans.charAt(0) != "y") {
@@ -111,7 +93,17 @@ const run = async () => {
     const identifiers = await getIdentifiers(page);
     console.log("\nElement identifiers injected. Check in devtools for the identifiers that match the main popup dom.\n");
 
-    const allPopupIdentifiers = [];
+    // Save the page content now since users might manipulate it while checking for popups
+    const content = await page.content();
+    const contentPath = join(TAPE_DIRECTORY, `${tapeId}.html`);
+    await writeFile(contentPath, content);
+
+    // Save a screenshot of the page
+    const screenshot = await page.screenshot();
+    const screenshotPath = join(TAPE_DIRECTORY, `${tapeId}.png`);
+    await writeFile(screenshotPath, screenshot);
+
+    const allPopupIdentifiers = [] as string[];
     while (true) {
         const ans = await promptUser(chalk.blue("What are the popup identifiers? (newline to finish)\n > "));
         if (!ans) break;
@@ -130,18 +122,9 @@ const run = async () => {
         exit();
     }
 
-    // Save the page content
-    const content = await page.content();
-    const contentPath = join(TAPE_DIRECTORY, `${tapeId}.html`);
-    await writeFile(contentPath, content);
-
-    // Save a screenshot of the page
-    const screenshot = await page.screenshot();
-    const screenshotPath = join(TAPE_DIRECTORY, `${tapeId}.png`);
-    await writeFile(screenshotPath, screenshot);
-
     // Save the groundtruth
     const groundtruth = {
+        request: url,
         identifiers: allPopupIdentifiers,
     }
     const groundtruthPath = join(TAPE_DIRECTORY, `${tapeId}.groundtruth.json`);
@@ -149,6 +132,8 @@ const run = async () => {
 
     replayManager.saveTape();
     await browser.close();
+
+    replayManager.close();
 }
 
 run();

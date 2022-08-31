@@ -139,3 +139,4 @@ dmypy.json
 node_modules
 build
 tape-directory
+.http-mitm-proxy

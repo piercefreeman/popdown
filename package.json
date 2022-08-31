@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "crawl": "ts-node src/index.ts"
+    "crawl": "ts-node src/run_crawl.ts",
+    "replay": "ts-node src/run_replay.ts"
   },
   "repository": {
     "type": "git",
@@ -20,12 +21,15 @@
   "homepage": "https://github.com/piercefreeman/popdown#readme",
   "dependencies": {
     "chalk": "^4.1.2",
+    "http-mitm-proxy": "^0.9.0",
     "make-fetch-happen": "^10.2.1",
+    "moment": "^2.29.4",
     "node-fetch": "^2.6.6",
     "playwright": "^1.25.1",
     "uuid": "^8.3.2"
   },
   "devDependencies": {
+    "@types/http-proxy": "^1.17.9",
     "@types/make-fetch-happen": "^10.0.0",
     "@types/node": "^18.7.13",
     "@types/uuid": "^8.3.4",

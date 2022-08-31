@@ -1,9 +1,10 @@
 import { Response } from "node-fetch";
 import { v4 as uuid4 } from "uuid";
-import { NodeFetchOptions } from "make-fetch-happen";
 import { sleep } from "./io";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { gunzipSync, gzipSync } from "zlib";
+import Proxy, { IProxy } from 'http-mitm-proxy';
+import { join } from 'path';
 
 interface ArchivedPayload {
   identifier: string;
@@ -30,8 +31,8 @@ interface ArchivedResponse {
 
   /// response metadata
   redirected: boolean;
-  status: number;
-  statusText: string;
+  statusCode: number;
+  statusMessage: string;
   headers: { [key: string]: any };
   body: string;
 }
@@ -59,10 +60,15 @@ export default class ReplayManager {
   // List of payloads that have already been played as part of this tape
   consumedPayloads: Set<string>;
 
+  // Webservice proxy intended to be the middleman layer between Chrome and replay handler
+  proxy: IProxy;
+  port: number;
+
   constructor(
     path: string | null,
     mode: ReplyMode = "read",
-    simulateLatency: boolean = true
+    simulateLatency: boolean = true,
+    port: number = 5010
   ) {
     this.path = path;
     this.mode = mode;
@@ -70,14 +76,63 @@ export default class ReplayManager {
     this.requestTape = [];
     this.consumedPayloads = new Set();
 
+    this.proxy = this.setupProxy()
+    this.port = port;
+
     if (this.mode == "read" && this.path) {
       console.log("Will load tape...");
       if (!existsSync(this.path)) {
           throw Error(`No file found at path: ${this.path}`)
       }
       this.requestTape = this.openTape();
-      console.log(`Did load: ${this.requestTape.length}`);
+      console.log(`Did load tape with size: ${this.requestTape.length}`);
     }
+  }
+
+  setupProxy() {
+    const self = this as any;
+    const proxy = Proxy();
+
+    proxy.onError((ctx: any, err: any) => {
+      const url = ctx && ctx.clientToProxyRequest ? ctx.clientToProxyRequest.url : "";
+      console.error(`Proxy error on ${url}:`, err);
+      if (err.code === "ERR_SSL_SSLV3_ALERT_CERTIFICATE_UNKNOWN") {
+          console.log("SSL certification failed.\nIt's likely you haven't installed the root certificate on your machine.");
+
+          // This will add a `NodeMITMProxyCA` cert to your local desktop keychain
+          console.log("MacOS: security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db ./.http-mitm-proxy/certs/ca.pem")
+          process.exit();
+      }
+    });
+
+    proxy.onRequest(async (ctx: any, callback: any) => {
+      const request = ctx.clientToProxyRequest;
+      const clientResponse = ctx.proxyToClientResponse;
+
+      if (this.mode == "read") {
+        const response = await self.simulateResponse(request, ctx, callback);
+        clientResponse.writeHeader(response.status || 500, response.headers);
+        clientResponse.write(response.body);
+        clientResponse.end()
+        // no callback() so proxy request is not sent to the actual server
+        return;
+      } else if (this.mode == "write") {
+        await self.newRequest(request, ctx, callback);
+      } else {
+        throw new ReplayError();
+      }
+      return callback();
+    });
+
+    return proxy;
+  }
+
+  listen() {
+    this.proxy.listen({port: this.port});
+  }
+
+  close() {
+    this.proxy.close();
   }
 
   playTape() {
@@ -87,67 +142,84 @@ export default class ReplayManager {
     this.consumedPayloads = new Set();
   }
 
-  async handleFetch(
-    url: string,
-    config: NodeFetchOptions,
-    fetchFn: any
-  ): Promise<Response> {
-    if (this.mode == "read") {
-      return await this.simulateResponse(url, config);
-    } else if (this.mode == "write") {
-      return await this.newRequest(url, config, fetchFn);
-    } else {
-      throw new ReplayError();
-    }
-  }
-
   async newRequest(
-    url: string,
-    config: NodeFetchOptions,
-    fetchFn: any
-  ): Promise<Response> {
+    request: any,
+    ctx: any,
+    callback: any,
+  ) {
+    const self = this as any;
     const startedAt = Date.now();
+    let finishedAt = null as null | number;
+  
+    const responseDataBuffers = [] as Buffer[];
 
-    const response = await fetchFn(url, config);
-
-    // Mark where this request has finished as close to the actual fetch request
-    // finishing as possible
-    const finishedAt = Date.now();
-
-    // We can only consume this once - a clone won't work here because of buffer
-    // size constraints: https://github.com/node-fetch/node-fetch/issues/553
-    const body = await response.buffer();
-    response.buffer = async () => {
-      return body;
-    };
-
-    this.requestTape.push({
-      identifier: uuid4().toString(),
-      request: {
-        url,
-        method: config.method,
-        headers: config.headers,
-        body: config.body ? (config.body as Buffer).toString("base64") : null,
-        order: this.requestTape.length,
-      },
-      response: {
-        url: response.url,
-        status: response.status,
-        headers: response.headers,
-        body: (await response.buffer()).toString("base64"),
-        redirected: response.redirected,
-        statusText: response.statusText,
-      },
-      inflightMilliseconds: finishedAt - startedAt,
+    ctx.use(Proxy.gunzip);
+  
+    /*
+    proxy.onRequestData(function(ctx, chunk, callback) {
+      console.log('REQUEST DATA:', chunk.toString());
+      return callback(null, chunk);
+    });*/
+  
+    ctx.onResponse(function(ctx: any, callback: any) {
+      return callback()
+    });
+  
+    ctx.onResponseData(function(ctx: any, chunk: any, callback: any) {
+      //chunk = new Buffer(chunk.toString().replace(/<h3.*?<\/h3>/g, '<h3>Pwned!</h3>'));
+      //chunk = Buffer.from(chunk.toString())
+      responseDataBuffers.push(chunk);
+      return callback(null, chunk);
     });
 
-    return response;
+    ctx.onResponseEnd(function(ctx: any, callback: any) {
+      // Mark where this request has finished as close to the actual fetch request
+      // finishing as possible
+      finishedAt = Date.now();
+
+      const request = ctx.clientToProxyRequest;
+
+      const proxyRequest = ctx.proxyToServerRequest;
+      const response = ctx.serverToProxyResponse;
+
+      self.requestTape.push({
+        identifier: uuid4().toString(),
+        request: {
+          // Since the proxy request actually connects to the 3rd party server, the protocol
+          // communicates what the client wants to retrieve. The direct client request doesn't have
+          // a protocol record since our server is on localhost
+          url: `${proxyRequest.protocol}//${join(request.headers.host, request.url)}`,
+          method: request.method,
+          headers: request.headers,
+          body: request.body ? (request.body as Buffer).toString("base64") : null,
+          order: self.requestTape.length,
+        },
+        response: {
+          // In the case of redirects, the proxy request is changed so the request URL should
+          // mirror what the server responds with
+          url: `${proxyRequest.protocol}//${join(proxyRequest.host, request.url)}`,
+          statusCode: response.statusCode,
+          headers: response.headers,
+          body: Buffer.concat(responseDataBuffers).toString("base64"),
+          redirected: response.redirected,
+          statusMessage: response.statusMessage,
+        },
+        inflightMilliseconds: finishedAt - startedAt,
+      });
+
+      //if (request.headers.host == "freeman.vc") {
+      //  throw new Error();
+      //}
+
+      return callback();
+    });
   }
 
   async simulateResponse(
-    url: string,
-    config: NodeFetchOptions
-  ): Promise<Response> {
+    request: any,
+    ctx: any,
+    callback: any,
+  ) {
     /*
         Simulates a response from the server. Finds the closest matching
         file. We will break ties by this order of priority:
@@ -163,9 +235,17 @@ export default class ReplayManager {
         same `inflight` timing that was.
         - Time
 
-        If no valid response is found, we'll throw an error.
+        If no valid response is found, we'll respond with a 404 page. This is useful for
+        cases where javascript generates some new outbound ping (ie. via a timestamp) but we don't
+        actually want to make the outbound call.
     */
-    console.log("Simulate", url);
+
+     // This appears to be the only object that has the protocol at this stage
+     // of the request lifecycle
+     const proxyAgent = ctx.proxyToServerRequestOptions.agent;
+    let url = join(request.headers.host, request.url);
+    url = `${proxyAgent.protocol}//${url}`;
+
     const {
       origin: requiredOrigin,
       pathname: requiredPathname,
@@ -195,7 +275,7 @@ export default class ReplayManager {
         ({ parsedUrl, request }) =>
           parsedUrl.origin == requiredOrigin &&
           parsedUrl.pathname == requiredPathname &&
-          (request.method || "GET") == (config.method || "GET")
+          (request.method || "GET") == (request.method || "GET")
       )
       .map(
         // Soft scoring for the other criteria
@@ -207,7 +287,7 @@ export default class ReplayManager {
           ),
           headerScore: scoreDictionaries(
             archive.request.headers,
-            config.headers
+            request.headers
           ),
         })
       )
@@ -232,7 +312,12 @@ export default class ReplayManager {
 
     // No valid remaining requests
     if (matchingRequests.length == 0) {
-      throw new ReplayError();
+      console.log("Missing request:", url);
+      return {
+        body: Buffer.from("Content not found"),
+        status: 404,
+        headers: {},
+      }
     }
 
     const match = matchingRequests[0];
@@ -242,20 +327,11 @@ export default class ReplayManager {
 
     // Hydrate a new response object, mocking some of the values that the API
     // won't let us natively set
-    const fullResponse = new Response(
-      Buffer.from(match.response.body, "base64"),
-      {
-        status: match.response.status,
-        headers: match.response.headers,
-        statusText: match.response.statusText,
-      }
-    );
-    Object.defineProperty(fullResponse, "url", { value: match.response.url });
-    Object.defineProperty(fullResponse, "redirected", {
-      value: match.response.redirected,
-    });
-
-    return fullResponse;
+    return {
+      body: Buffer.from(match.response.body, "base64"),
+      status: match.response.statusCode,
+      headers: match.response.headers,
+    };
   }
 
   saveTape() {
