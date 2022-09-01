@@ -6,12 +6,23 @@ import chalk from 'chalk';
 import { TAPE_DIRECTORY, IDENTIFIER_KEY, FEATURES_DIRECTORY } from './constants';
 import { getIdentifiers } from './crawl_utilities';
 import { existsSync, mkdirSync } from 'fs';
+import { gzipSync } from 'zlib';
 
 if (!existsSync(FEATURES_DIRECTORY)) {
     mkdirSync(FEATURES_DIRECTORY);
 }
 
 const run = async () => {
+    /*
+     * Will featurize each recorded page in sequence. We recreate the browser instance
+     * with the same dependencies so should create the exact environment that we observed
+     * at crawl time while allowing us to separately iterate on the featurization format.
+     * 
+     * We export files as gzip compressed JSON files. The style featurization particularly
+     * is highly redundant, since it encodes all CSS values that a browser supports and not
+     * just the ones that were overriden by that element. This allows us to decrease file sizes
+     * from 200MB+ to 5MB per page on average.
+     */
     const matchFiles = new RegExp(`(.+)\.groundtruth\.json`);
     const tapePath = (
         readdirSync(TAPE_DIRECTORY)
@@ -85,7 +96,8 @@ const run = async () => {
             })
         );
 
-        writeFileSync(join(FEATURES_DIRECTORY, `${tapeId}.json`), JSON.stringify(rawFeatures));
+        const encodedContent = rawFeatures.map((obj: any) => JSON.stringify(obj)).join("\n");
+        writeFileSync(join(FEATURES_DIRECTORY, `${tapeId}.jsonl.gz`), gzipSync(encodedContent));
         console.log(chalk.green(`Wrote features for ${tapeId}`));
 
         replayManager.close();

@@ -65,7 +65,7 @@ const run = async () => {
     const page = await context.newPage();
 
     try {
-        await page.goto(url);
+        await page.goto(url, {timeout: 1000*60, waitUntil: "networkidle"});
     } catch (e) {
         console.log(chalk.red(`Load error ${url}`));
     }
