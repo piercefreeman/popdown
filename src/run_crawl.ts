@@ -122,6 +122,10 @@ const run = async () => {
     await browser.close();
 
     replayManager.close();
+
+    // BUG: The CLI doesn't quit even once we cleanup resources; there's likely some
+    // spawned thread or port hook that isn't cleaned up.
+    exit();
 }
 
 run();

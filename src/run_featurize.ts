@@ -7,6 +7,7 @@ import { TAPE_DIRECTORY, IDENTIFIER_KEY, FEATURES_DIRECTORY } from './constants'
 import { getIdentifiers } from './crawl_utilities';
 import { existsSync, mkdirSync } from 'fs';
 import { gzipSync } from 'zlib';
+import { exit } from 'process';
 
 if (!existsSync(FEATURES_DIRECTORY)) {
     mkdirSync(FEATURES_DIRECTORY);
@@ -103,6 +104,8 @@ const run = async () => {
         replayManager.close();
         await browser.close();
     }
+
+    exit();
 }
 
 run();

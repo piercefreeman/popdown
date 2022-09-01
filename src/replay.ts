@@ -1,10 +1,10 @@
-import { Response } from "node-fetch";
 import { v4 as uuid4 } from "uuid";
 import { sleep } from "./io";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { gunzipSync, gzipSync, brotliCompressSync, inflateSync } from "zlib";
 import Proxy, { IProxy } from '@bjowes/http-mitm-proxy';
 import { join } from 'path';
+import chalk from 'chalk';
 
 interface ArchivedPayload {
   identifier: string;
@@ -109,11 +109,10 @@ export default class ReplayManager {
       const url = ctx && ctx.clientToProxyRequest ? ctx.clientToProxyRequest.url : "";
       console.error(`Proxy error on ${url}:`, err);
       if (err.code === "ERR_SSL_SSLV3_ALERT_CERTIFICATE_UNKNOWN") {
-          console.log("SSL certification failed.\nIt's likely you haven't installed the root certificate on your machine.");
+          console.log(chalk.red("SSL certification failed.\nIt's likely you haven't installed the root certificate on your machine."));
 
           // This will add a `NodeMITMProxyCA` cert to your local desktop keychain
-          console.log("MacOS: security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db ./.http-mitm-proxy/certs/ca.pem")
-          process.exit();
+          console.log(chalk.red("MacOS: security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db ./.http-mitm-proxy/certs/ca.pem"));
       }
     });
 
