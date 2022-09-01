@@ -28,8 +28,4 @@ export http_proxy=http://127.0.01:9090
 export https_proxy=http://127.0.01:9090
 ```
 
-
-    /*"test": "echo \"Error: no test specified\" && exit 1",
-    "crawl": "ts-node src/run_crawl.ts",
-    "replay": "ts-node src/run_replay.ts",
-    "featurize": "ts-node src/run_featurize.ts"*/
+//"http-mitm-proxy": "github:joeferner/node-http-mitm-proxy#master",

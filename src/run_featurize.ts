@@ -1,10 +1,11 @@
 import { chromium } from 'playwright';
-import { promptUser, sleep } from './io.js';
-import ReplayManager from './replay.js';
+import { promptUser, sleep } from './io';
+import ReplayManager from './replay';
 import { join } from 'path';
 import { readFileSync } from 'fs';
 import chalk from 'chalk';
-import { TAPE_DIRECTORY } from './constants.js';
+import { TAPE_DIRECTORY } from './constants';
+import { gzipSync } from 'zlib';
 
 const run = async () => {
     //const tapeId = await promptUser(chalk.blue("What's the tape ID?\n > "));
@@ -44,7 +45,7 @@ const run = async () => {
     const page = await context.newPage();
 
     try {
-        await page.goto(url);
+        await page.goto(url, {timeout: 1000*60, waitUntil: "networkidle"});
     } catch (e) {
         console.log(chalk.red(`Load error ${url}`));
     }
