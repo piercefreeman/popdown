@@ -8,6 +8,7 @@ import { writeFile } from 'fs/promises';
 import chalk from 'chalk';
 import { exit } from 'process';
 import { TAPE_DIRECTORY, IDENTIFIER_KEY } from './constants';
+import { getIdentifiers } from './crawl_utilities';
 
 if (!existsSync(TAPE_DIRECTORY)) {
     mkdirSync(TAPE_DIRECTORY);
@@ -30,20 +31,6 @@ const injectElementIdentifiers = async (page: Page) => {
         Array.from(all).forEach((element) => {
         element.setAttribute(identifierKey, uuidv4().toString());
         });
-    }, IDENTIFIER_KEY);
-}
-
-const getIdentifiers = async (page: Page): Promise<Array<string>> => {
-    return await page.evaluate((identifierKey) => {
-        const allElements = Array.from(
-        document.querySelectorAll("*")
-        ) as Array<HTMLElement>;
-
-        return allElements
-        .filter((element) => element.hasAttribute(identifierKey))
-        .map((element) =>
-            element.getAttribute(identifierKey)
-        ) as Array<string>;
     }, IDENTIFIER_KEY);
 }
 

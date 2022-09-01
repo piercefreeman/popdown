@@ -21,7 +21,6 @@
   "homepage": "https://github.com/piercefreeman/popdown#readme",
   "dependencies": {
     "@bjowes/http-mitm-proxy": "^0.9.4",
-    "brotli": "^1.3.3",
     "chalk": "^4.1.2",
     "http-mitm-proxy": "^0.9.0",
     "make-fetch-happen": "^10.2.1",
