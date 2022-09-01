@@ -58,7 +58,7 @@ const run = async () => {
     if (url.indexOf("http") != 0) url = `http://${url}`;
 
     const tapeId = uuidv4();
-    const replayManager = new ReplayManager(join(TAPE_DIRECTORY, `${tapeId}.json.gz`), "write");
+    const replayManager = new ReplayManager(join(TAPE_DIRECTORY, `${tapeId}.json.gz`), {mode: "write"});
     replayManager.listen();
 
     const browser = await chromium.launch({
@@ -125,6 +125,7 @@ const run = async () => {
     // Save the groundtruth
     const groundtruth = {
         request: url,
+        respone: page.url(),
         identifiers: allPopupIdentifiers,
     }
     const groundtruthPath = join(TAPE_DIRECTORY, `${tapeId}.groundtruth.json`);

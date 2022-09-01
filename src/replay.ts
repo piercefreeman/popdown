@@ -1,9 +1,9 @@
 import { Response } from "node-fetch";
 import { v4 as uuid4 } from "uuid";
-import { sleep } from "./io";
+import { sleep } from "./io.js";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { gunzipSync, gzipSync } from "zlib";
-import Proxy, { IProxy } from 'http-mitm-proxy';
+import Proxy from 'http-mitm-proxy';
 import { join } from 'path';
 
 interface ArchivedPayload {
@@ -37,6 +37,13 @@ interface ArchivedResponse {
   body: string;
 }
 
+interface ReplayConfig {
+  mode?: ReplyMode;
+  simulateLatency?: boolean,
+  port?: number;
+  overrideUrls?: Map<string, string> | null;
+}
+
 type ReplyMode = "read" | "write";
 
 class ReplayError extends Error {}
@@ -61,23 +68,28 @@ export default class ReplayManager {
   consumedPayloads: Set<string>;
 
   // Webservice proxy intended to be the middleman layer between Chrome and replay handler
-  proxy: IProxy;
+  proxy: Proxy;
   port: number;
+
+  // Custom overrides of URL -> page
+  // Assumes that the URL is already in the tape store, won't execute otherwise
+  overrideUrls: Map<string, string>;
 
   constructor(
     path: string | null,
-    mode: ReplyMode = "read",
-    simulateLatency: boolean = true,
-    port: number = 5010
+    config: ReplayConfig | null = null,
   ) {
+    config = config || {}
+
     this.path = path;
-    this.mode = mode;
-    this.simulateLatency = simulateLatency;
+    this.mode = config.mode || "read";
+    this.simulateLatency = config.simulateLatency || true;
     this.requestTape = [];
     this.consumedPayloads = new Set();
 
     this.proxy = this.setupProxy()
-    this.port = port;
+    this.port = config.port || 5010;
+    this.overrideUrls = config.overrideUrls || new Map();
 
     if (this.mode == "read" && this.path) {
       console.log("Will load tape...");
@@ -91,7 +103,7 @@ export default class ReplayManager {
 
   setupProxy() {
     const self = this as any;
-    const proxy = Proxy();
+    const proxy = new Proxy();
 
     proxy.onError((ctx: any, err: any) => {
       const url = ctx && ctx.clientToProxyRequest ? ctx.clientToProxyRequest.url : "";
@@ -128,6 +140,8 @@ export default class ReplayManager {
   }
 
   listen() {
+    // https://github.com/joeferner/node-http-mitm-proxy/issues/165
+    // https://github.com/joeferner/node-http-mitm-proxy/issues/177
     this.proxy.listen({port: this.port});
   }
 
@@ -325,10 +339,17 @@ export default class ReplayManager {
 
     if (this.simulateLatency) await sleep(match.inflightMilliseconds);
 
+    let body = Buffer.from(match.response.body, "base64");
+
+    if (this.overrideUrls.get(match.response.url)) {
+      console.log("Override used:", match.response.url)
+      body = Buffer.from(this.overrideUrls.get(match.response.url)!);
+    }
+
     // Hydrate a new response object, mocking some of the values that the API
     // won't let us natively set
     return {
-      body: Buffer.from(match.response.body, "base64"),
+      body,
       status: match.response.statusCode,
       headers: match.response.headers,
     };
