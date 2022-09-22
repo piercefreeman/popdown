@@ -27,3 +27,5 @@ The `fetch` requests that node issues won't display by [default](https://github.
 export http_proxy=http://127.0.01:9090
 export https_proxy=http://127.0.01:9090
 ```
+
+//"http-mitm-proxy": "github:joeferner/node-http-mitm-proxy#master",

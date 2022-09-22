@@ -4,9 +4,9 @@
   "description": "Isolate and remove marketing and GDPR popups from websites",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "crawl": "ts-node src/run_crawl.ts",
-    "replay": "ts-node src/run_replay.ts"
+    "replay": "ts-node src/run_replay.ts",
+    "featurize": "ts-node src/run_featurize.ts"
   },
   "repository": {
     "type": "git",
@@ -20,6 +20,7 @@
   },
   "homepage": "https://github.com/piercefreeman/popdown#readme",
   "dependencies": {
+    "@bjowes/http-mitm-proxy": "^0.9.4",
     "chalk": "^4.1.2",
     "http-mitm-proxy": "^0.9.0",
     "make-fetch-happen": "^10.2.1",
@@ -29,6 +30,7 @@
     "uuid": "^8.3.2"
   },
   "devDependencies": {
+    "@types/brotli": "^1.3.1",
     "@types/http-proxy": "^1.17.9",
     "@types/make-fetch-happen": "^10.0.0",
     "@types/node": "^18.7.13",

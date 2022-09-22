@@ -1,10 +1,10 @@
-import { Response } from "node-fetch";
 import { v4 as uuid4 } from "uuid";
 import { sleep } from "./io";
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import { gunzipSync, gzipSync } from "zlib";
-import Proxy, { IProxy } from 'http-mitm-proxy';
+import { gunzipSync, gzipSync, brotliCompressSync, inflateSync } from "zlib";
+import Proxy, { IProxy } from '@bjowes/http-mitm-proxy';
 import { join } from 'path';
+import chalk from 'chalk';
 
 interface ArchivedPayload {
   identifier: string;
@@ -37,6 +37,13 @@ interface ArchivedResponse {
   body: string;
 }
 
+interface ReplayConfig {
+  mode?: ReplyMode;
+  simulateLatency?: boolean,
+  port?: number;
+  overrideUrls?: Map<string, string> | null;
+}
+
 type ReplyMode = "read" | "write";
 
 class ReplayError extends Error {}
@@ -64,20 +71,25 @@ export default class ReplayManager {
   proxy: IProxy;
   port: number;
 
+  // Custom overrides of URL -> page
+  // Assumes that the URL is already in the tape store, won't execute otherwise
+  overrideUrls: Map<string, string>;
+
   constructor(
     path: string | null,
-    mode: ReplyMode = "read",
-    simulateLatency: boolean = true,
-    port: number = 5010
+    config: ReplayConfig | null = null,
   ) {
+    config = config || {}
+
     this.path = path;
-    this.mode = mode;
-    this.simulateLatency = simulateLatency;
+    this.mode = config.mode || "read";
+    this.simulateLatency = config.simulateLatency || true;
     this.requestTape = [];
     this.consumedPayloads = new Set();
 
     this.proxy = this.setupProxy()
-    this.port = port;
+    this.port = config.port || 5010;
+    this.overrideUrls = config.overrideUrls || new Map();
 
     if (this.mode == "read" && this.path) {
       console.log("Will load tape...");
@@ -97,11 +109,10 @@ export default class ReplayManager {
       const url = ctx && ctx.clientToProxyRequest ? ctx.clientToProxyRequest.url : "";
       console.error(`Proxy error on ${url}:`, err);
       if (err.code === "ERR_SSL_SSLV3_ALERT_CERTIFICATE_UNKNOWN") {
-          console.log("SSL certification failed.\nIt's likely you haven't installed the root certificate on your machine.");
+          console.log(chalk.red("SSL certification failed.\nIt's likely you haven't installed the root certificate on your machine."));
 
           // This will add a `NodeMITMProxyCA` cert to your local desktop keychain
-          console.log("MacOS: security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db ./.http-mitm-proxy/certs/ca.pem")
-          process.exit();
+          console.log(chalk.red("MacOS: security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db ./.http-mitm-proxy/certs/ca.pem"));
       }
     });
 
@@ -128,6 +139,8 @@ export default class ReplayManager {
   }
 
   listen() {
+    // https://github.com/joeferner/node-http-mitm-proxy/issues/165
+    // https://github.com/joeferner/node-http-mitm-proxy/issues/177
     this.proxy.listen({port: this.port});
   }
 
@@ -166,6 +179,9 @@ export default class ReplayManager {
     });
   
     ctx.onResponseData(function(ctx: any, chunk: any, callback: any) {
+      const proxyRequest = ctx.proxyToServerRequest;
+      const response = ctx.serverToProxyResponse;
+
       //chunk = new Buffer(chunk.toString().replace(/<h3.*?<\/h3>/g, '<h3>Pwned!</h3>'));
       //chunk = Buffer.from(chunk.toString())
       responseDataBuffers.push(chunk);
@@ -182,6 +198,11 @@ export default class ReplayManager {
       const proxyRequest = ctx.proxyToServerRequest;
       const response = ctx.serverToProxyResponse;
 
+      /*if (`${proxyRequest.protocol}//${join(request.headers.host, request.url)}` == "https://www.aviatornation.com/collections/new-arrivals/products/5-stripe-hoodie-ocean-2") {
+        const content = Buffer.concat(responseDataBuffers).toString();
+        console.log("Content", content)
+      }*/
+  
       self.requestTape.push({
         identifier: uuid4().toString(),
         request: {
@@ -325,10 +346,38 @@ export default class ReplayManager {
 
     if (this.simulateLatency) await sleep(match.inflightMilliseconds);
 
+    let body = Buffer.from(match.response.body, "base64");
+
+    if (this.overrideUrls.get(match.response.url)) {
+      console.log("Override used:", match.response.url)
+
+      //body = gzipSync(Buffer.from(this.overrideUrls.get(match.response.url)!));
+      let rawBody = this.overrideUrls.get(match.response.url)!;
+
+      // Support different browser encoding schemas since the content should be encoded
+      // at this stage already
+      const encodingDefinitions = Object.entries(match.response.headers).filter(([key, value]) => (key.toLocaleLowerCase() == "content-encoding"));
+      const encoding = encodingDefinitions.length > 0 ? encodingDefinitions[0][1] : null;
+
+      // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Encoding
+      if (encoding == "gzip") {
+        body = gzipSync(rawBody);
+      } else if (encoding == "br") {
+        body = brotliCompressSync(rawBody);
+      } else if (encoding == "deflate") {
+        body = inflateSync(rawBody);
+      } else if (!encoding) {
+        // No encoding needed if null
+        body = Buffer.from(body);
+      } else {
+        throw new Error(`Unknown encoding: ${encoding}`);
+      }
+    }
+
     // Hydrate a new response object, mocking some of the values that the API
     // won't let us natively set
     return {
-      body: Buffer.from(match.response.body, "base64"),
+      body,
       status: match.response.statusCode,
       headers: match.response.headers,
     };

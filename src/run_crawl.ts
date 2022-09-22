@@ -8,6 +8,7 @@ import { writeFile } from 'fs/promises';
 import chalk from 'chalk';
 import { exit } from 'process';
 import { TAPE_DIRECTORY, IDENTIFIER_KEY } from './constants';
+import { getIdentifiers } from './crawl_utilities';
 
 if (!existsSync(TAPE_DIRECTORY)) {
     mkdirSync(TAPE_DIRECTORY);
@@ -33,20 +34,6 @@ const injectElementIdentifiers = async (page: Page) => {
     }, IDENTIFIER_KEY);
 }
 
-const getIdentifiers = async (page: Page): Promise<Array<string>> => {
-    return await page.evaluate((identifierKey) => {
-        const allElements = Array.from(
-        document.querySelectorAll("*")
-        ) as Array<HTMLElement>;
-
-        return allElements
-        .filter((element) => element.hasAttribute(identifierKey))
-        .map((element) =>
-            element.getAttribute(identifierKey)
-        ) as Array<string>;
-    }, IDENTIFIER_KEY);
-}
-
 const run = async () => {
     let url = await promptUser(chalk.blue("What's the url to add to the datapoint?\n > "));
     if (!url) {
@@ -58,7 +45,7 @@ const run = async () => {
     if (url.indexOf("http") != 0) url = `http://${url}`;
 
     const tapeId = uuidv4();
-    const replayManager = new ReplayManager(join(TAPE_DIRECTORY, `${tapeId}.json.gz`), "write");
+    const replayManager = new ReplayManager(join(TAPE_DIRECTORY, `${tapeId}.json.gz`), {mode: "write"});
     replayManager.listen();
 
     const browser = await chromium.launch({
@@ -78,7 +65,7 @@ const run = async () => {
     const page = await context.newPage();
 
     try {
-        await page.goto(url);
+        await page.goto(url, {timeout: 1000*60, waitUntil: "networkidle"});
     } catch (e) {
         console.log(chalk.red(`Load error ${url}`));
     }
@@ -125,6 +112,7 @@ const run = async () => {
     // Save the groundtruth
     const groundtruth = {
         request: url,
+        respone: page.url(),
         identifiers: allPopupIdentifiers,
     }
     const groundtruthPath = join(TAPE_DIRECTORY, `${tapeId}.groundtruth.json`);
@@ -134,6 +122,10 @@ const run = async () => {
     await browser.close();
 
     replayManager.close();
+
+    // BUG: The CLI doesn't quit even once we cleanup resources; there's likely some
+    // spawned thread or port hook that isn't cleaned up.
+    exit();
 }
 
 run();
