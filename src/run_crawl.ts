@@ -4,34 +4,14 @@ import ReplayManager from './replay';
 import { v4 as uuidv4 } from 'uuid';
 import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
-import { writeFile } from 'fs/promises';
+import { writeFile, rm } from 'fs/promises';
 import chalk from 'chalk';
 import { exit } from 'process';
 import { TAPE_DIRECTORY, IDENTIFIER_KEY } from './constants';
-import { getIdentifiers } from './crawl_utilities';
+import { getIdentifiers, injectElementIdentifiers } from './crawl_utilities';
 
 if (!existsSync(TAPE_DIRECTORY)) {
     mkdirSync(TAPE_DIRECTORY);
-}
-
-const injectElementIdentifiers = async (page: Page) => {
-    await page.evaluate((identifierKey) => {
-        // Re-implement uuid4 function so it can be injected into the page
-        function uuidv4() {
-        // @ts-ignore
-        return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (c) =>
-            (
-            c ^
-            (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))
-            ).toString(16)
-        );
-        }
-
-        var all = document.getElementsByTagName("*");
-        Array.from(all).forEach((element) => {
-        element.setAttribute(identifierKey, uuidv4().toString());
-        });
-    }, IDENTIFIER_KEY);
 }
 
 const run = async () => {
@@ -47,6 +27,10 @@ const run = async () => {
     const tapeId = uuidv4();
     const replayManager = new ReplayManager(join(TAPE_DIRECTORY, `${tapeId}.json.gz`), {mode: "write"});
     replayManager.listen();
+
+    const contentPath = join(TAPE_DIRECTORY, `${tapeId}.html`);
+    const screenshotPath = join(TAPE_DIRECTORY, `${tapeId}.png`);
+    const groundtruthPath = join(TAPE_DIRECTORY, `${tapeId}.groundtruth.json`);
 
     const browser = await chromium.launch({
         headless: false,
@@ -82,12 +66,10 @@ const run = async () => {
 
     // Save the page content now since users might manipulate it while checking for popups
     const content = await page.content();
-    const contentPath = join(TAPE_DIRECTORY, `${tapeId}.html`);
     await writeFile(contentPath, content);
 
     // Save a screenshot of the page
     const screenshot = await page.screenshot();
-    const screenshotPath = join(TAPE_DIRECTORY, `${tapeId}.png`);
     await writeFile(screenshotPath, screenshot);
 
     const allPopupIdentifiers = [] as string[];
@@ -106,6 +88,11 @@ const run = async () => {
 
     if (allPopupIdentifiers.length == 0) {
         console.log(chalk.red("No popup identifiers supplied."));
+
+        // Cleanup the artifact files since we won't be saving ground truth identifiers alongside them
+        await rm(contentPath);
+        await rm(screenshotPath);
+
         exit();
     }
 
@@ -115,7 +102,6 @@ const run = async () => {
         respone: page.url(),
         identifiers: allPopupIdentifiers,
     }
-    const groundtruthPath = join(TAPE_DIRECTORY, `${tapeId}.groundtruth.json`);
     await writeFile(groundtruthPath, JSON.stringify(groundtruth));
 
     replayManager.saveTape();

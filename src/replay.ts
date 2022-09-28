@@ -5,6 +5,8 @@ import { gunzipSync, gzipSync, brotliCompressSync, inflateSync } from "zlib";
 import Proxy, { IProxy } from '@bjowes/http-mitm-proxy';
 import { join } from 'path';
 import chalk from 'chalk';
+import portfinder from 'portfinder';
+import AsyncLock from 'async-lock';
 
 interface ArchivedPayload {
   identifier: string;
@@ -48,6 +50,8 @@ type ReplyMode = "read" | "write";
 
 class ReplayError extends Error {}
 
+const openPortLock = new AsyncLock();
+
 export default class ReplayManager {
   // Current mode of the
   mode: ReplyMode;
@@ -69,7 +73,7 @@ export default class ReplayManager {
 
   // Webservice proxy intended to be the middleman layer between Chrome and replay handler
   proxy: IProxy;
-  port: number;
+  port: number | null;
 
   // Custom overrides of URL -> page
   // Assumes that the URL is already in the tape store, won't execute otherwise
@@ -88,7 +92,7 @@ export default class ReplayManager {
     this.consumedPayloads = new Set();
 
     this.proxy = this.setupProxy()
-    this.port = config.port || 5010;
+    this.port = config.port || null;
     this.overrideUrls = config.overrideUrls || new Map();
 
     if (this.mode == "read" && this.path) {
@@ -138,10 +142,38 @@ export default class ReplayManager {
     return proxy;
   }
 
-  listen() {
-    // https://github.com/joeferner/node-http-mitm-proxy/issues/165
-    // https://github.com/joeferner/node-http-mitm-proxy/issues/177
-    this.proxy.listen({port: this.port});
+  async listen() {
+    // Avoid race conditions if two replay servers are allocating at the same time
+    // and we interrupt right as `getOpenPort` is running. This would allow both processse
+    // to request the same "open" port yet only one would successfully bind to it.
+    return openPortLock.acquire("port", async () => {
+      // If we don't yet have a port, assign one
+      if (!this.port) {
+        this.port = await this.getOpenPort();
+      }
+
+      // https://github.com/joeferner/node-http-mitm-proxy/issues/165
+      // https://github.com/joeferner/node-http-mitm-proxy/issues/177
+      this.proxy.listen({port: this.port});
+
+      // Wait to claim this port
+      await sleep(1000);
+    });
+  }
+
+  getOpenPort() : Promise<number> {
+    return new Promise(
+      (resolve, reject) => {
+        portfinder.getPort(
+          (err, port) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(port);
+          }
+        });
+      }
+    )
   }
 
   close() {
